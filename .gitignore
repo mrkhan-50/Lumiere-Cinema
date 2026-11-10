@@ -1,0 +1,32 @@
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Next.js build output
+.next/
+out/
+
+# Environment files
+.env
+.env.*
+
+# Prisma
+prisma/.cache/
+*.db
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Misc
+coverage/
+.dist/
+
+# IDE files
+.vscode/
+.idea/

@@ -1,0 +1,284 @@
+// Prisma schema for LUMIÈRE Cinema Platform (Default local SQLite engine)
+// For PostgreSQL production deployment, switch to prisma/schema.postgresql.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         String     @default("USER") // USER, ADMIN, CINEMA_STAFF
+  phone        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  bookings     Booking[]
+  seatHolds    SeatHold[]
+  auditLogs    AuditLog[]
+
+  @@index([email])
+}
+
+model Movie {
+  id            String     @id @default(uuid())
+  title         String
+  description   String
+  genre         String     // Comma-separated or single: "Action, Sci-Fi"
+  language      String     // "Hindi", "English", "Tamil", "Telugu"
+  duration      Int        // Duration in minutes
+  releaseDate   DateTime
+  posterUrl     String
+  bannerUrl     String?
+  trailerUrl    String
+  certification String     // "U/A 16+", "A", "U", "PG-13"
+  rating        Float      @default(8.5)
+  status        String     @default("NOW_SHOWING") // NOW_SHOWING, COMING_SOON, TRENDING, ARCHIVED
+  cast          String?    // JSON or comma separated
+  director      String?
+  formats       String     @default("2D, 3D, IMAX") // Comma-separated formats
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  showtimes     Showtime[]
+
+  @@index([status])
+  @@index([language])
+}
+
+model Cinema {
+  id         String     @id @default(uuid())
+  name       String
+  city       String     // Delhi, Noida, Mumbai, Bengaluru, etc.
+  address    String
+  facilities String     @default("Dolby Atmos, Parking, Food Court, Recliner Seats")
+  status     String     @default("ACTIVE") // ACTIVE, INACTIVE
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  screens    Screen[]
+
+  @@index([city])
+}
+
+model Screen {
+  id            String     @id @default(uuid())
+  cinemaId      String
+  cinema        Cinema     @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
+  name          String     // "Audi 1 - IMAX Laser", "Audi 2 - Dolby Cinema"
+  format        String     @default("IMAX") // 2D, 3D, IMAX, 4DX
+  totalSeats    Int        @default(120)
+  seatingLayout String?    // JSON representation of layout rows and aisles
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  seats         Seat[]
+  showtimes     Showtime[]
+
+  @@index([cinemaId])
+}
+
+model Seat {
+  id            String         @id @default(uuid())
+  screenId      String
+  screen        Screen         @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  row           String         // "A", "B", "C", ...
+  number        Int            // 1, 2, 3, ...
+  category      String         @default("REGULAR") // REGULAR, PREMIUM, EXECUTIVE, RECLINER, VIP
+  basePrice     Int            // In minor currency units (paise: e.g., 35000 = ₹350)
+  createdAt     DateTime       @default(now())
+
+  bookingSeats  BookingSeat[]
+  seatHoldItems SeatHoldItem[]
+
+  @@unique([screenId, row, number])
+  @@index([screenId])
+}
+
+model Showtime {
+  id              String      @id @default(uuid())
+  movieId         String
+  movie           Movie       @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  screenId        String
+  screen          Screen      @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  startsAt        DateTime
+  endsAt          DateTime
+  format          String      @default("IMAX 3D")
+  priceMultiplier Float       @default(1.0)
+  status          String      @default("SCHEDULED") // SCHEDULED, ACTIVE, COMPLETED, CANCELLED
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  bookings        Booking[]
+  seatHolds       SeatHold[]
+
+  @@index([movieId])
+  @@index([screenId])
+  @@index([startsAt])
+}
+
+model SeatHold {
+  id          String         @id @default(uuid())
+  userId      String?
+  user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  showtimeId  String
+  showtime    Showtime       @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  holdToken   String         @unique
+  expiresAt   DateTime
+  status      String         @default("ACTIVE") // ACTIVE, EXPIRED, RELEASED, CONVERTED
+  createdAt   DateTime       @default(now())
+
+  items       SeatHoldItem[]
+
+  @@index([showtimeId])
+  @@index([expiresAt])
+}
+
+model SeatHoldItem {
+  id      String   @id @default(uuid())
+  holdId  String
+  hold    SeatHold @relation(fields: [holdId], references: [id], onDelete: Cascade)
+  seatId  String
+  seat    Seat     @relation(fields: [seatId], references: [id], onDelete: Cascade)
+
+  @@unique([holdId, seatId])
+  @@index([seatId])
+}
+
+model Booking {
+  id               String        @id @default(uuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  showtimeId       String
+  showtime         Showtime      @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  bookingReference String        @unique // e.g. "LUM-2026-X89F2"
+  status           String        @default("PENDING") // PENDING, CONFIRMED, CANCELLED, REFUNDED
+  
+  // Amounts in minor currency units (paise) to prevent floating point inaccuracies
+  subtotalAmount   Int
+  convenienceFee   Int           @default(3000) // ₹30 in paise
+  taxAmount        Int           @default(540)  // 18% GST on convenience fee
+  discountAmount   Int           @default(0)
+  totalAmount      Int
+  
+  promoCodeId      String?
+  promoCode        PromoCode?    @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
+  
+  customerName     String?
+  customerEmail    String?
+  customerPhone    String?
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  seats            BookingSeat[]
+  payments         Payment[]
+  ticket           Ticket?
+  refunds          Refund[]
+
+  @@index([userId])
+  @@index([showtimeId])
+  @@index([bookingReference])
+}
+
+model BookingSeat {
+  id         String   @id @default(uuid())
+  bookingId  String
+  booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  seatId     String
+  seat       Seat     @relation(fields: [seatId], references: [id], onDelete: Cascade)
+  finalPrice Int      // In paise
+
+  @@unique([bookingId, seatId])
+  @@index([seatId])
+}
+
+model Payment {
+  id               String    @id @default(uuid())
+  bookingId        String
+  booking          Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  gatewayOrderId   String    // Razorpay order_id
+  gatewayPaymentId String?   // Razorpay payment_id (when paid)
+  gatewaySignature String?   // HMAC SHA256 signature
+  amount           Int       // In paise
+  currency         String    @default("INR")
+  status           String    @default("CREATED") // CREATED, PENDING, AUTHORIZED, CAPTURED, FAILED, REFUNDED
+  paymentMethod    String?   // "UPI", "CARD", "NETBANKING", "WALLET"
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  refunds          Refund[]
+
+  @@index([bookingId])
+  @@index([gatewayOrderId])
+}
+
+model Ticket {
+  id             String    @id @default(uuid())
+  bookingId      String    @unique
+  booking        Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  secureToken    String    @unique // Opaque signed token embedded in QR
+  qrCodeData     String    // Base64 Data URL or verification string
+  checkInStatus  String    @default("NOT_CHECKED_IN") // NOT_CHECKED_IN, CHECKED_IN
+  checkedInAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([secureToken])
+}
+
+model Refund {
+  id              String    @id @default(uuid())
+  bookingId       String
+  booking         Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  paymentId       String
+  payment         Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount          Int       // In paise
+  reason          String?
+  gatewayRefundId String?
+  status          String    @default("REQUESTED") // REQUESTED, PROCESSING, COMPLETED, FAILED
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([bookingId])
+  @@index([paymentId])
+}
+
+model PromoCode {
+  id            String    @id @default(uuid())
+  code          String    @unique // e.g. "LUMIERE50", "GOLDEN20"
+  description   String?
+  discountType  String    @default("PERCENTAGE") // PERCENTAGE, FIXED
+  discountValue Int       // e.g. 20 for 20% or 10000 for ₹100
+  minOrderValue Int       @default(0) // In paise
+  maxDiscount   Int?      // In paise (for percentage discounts)
+  usageLimit    Int       @default(100)
+  timesUsed     Int       @default(0)
+  expiresAt     DateTime
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  bookings      Booking[]
+
+  @@index([code])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String   // e.g. "SEAT_HOLD_CREATED", "BOOKING_CONFIRMED", "TICKET_VERIFIED", "REFUND_PROCESSED"
+  entityType String   // "Booking", "Payment", "Showtime", "Ticket"
+  entityId   String
+  details    String?  // JSON payload
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+}

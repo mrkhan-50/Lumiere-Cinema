@@ -1,0 +1,355 @@
+// Prisma schema for LUMIÈRE Cinema Platform (PostgreSQL Production)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+  CINEMA_STAFF
+}
+
+enum MovieStatus {
+  NOW_SHOWING
+  COMING_SOON
+  TRENDING
+  ARCHIVED
+}
+
+enum CinemaStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SeatCategory {
+  REGULAR
+  PREMIUM
+  EXECUTIVE
+  RECLINER
+  VIP
+}
+
+enum ShowtimeStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum HoldStatus {
+  ACTIVE
+  EXPIRED
+  RELEASED
+  CONVERTED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+enum CheckInStatus {
+  NOT_CHECKED_IN
+  CHECKED_IN
+}
+
+enum RefundStatus {
+  REQUESTED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(USER)
+  phone        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  bookings     Booking[]
+  seatHolds    SeatHold[]
+  auditLogs    AuditLog[]
+
+  @@index([email])
+}
+
+model Movie {
+  id            String      @id @default(uuid())
+  title         String
+  description   String
+  genre         String
+  language      String
+  duration      Int
+  releaseDate   DateTime
+  posterUrl     String
+  bannerUrl     String?
+  trailerUrl    String
+  certification String
+  rating        Float       @default(8.5)
+  status        MovieStatus @default(NOW_SHOWING)
+  cast          String?
+  director      String?
+  formats       String      @default("2D, 3D, IMAX")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  showtimes     Showtime[]
+
+  @@index([status])
+  @@index([language])
+}
+
+model Cinema {
+  id         String       @id @default(uuid())
+  name       String
+  city       String
+  address    String
+  facilities String       @default("Dolby Atmos, Parking, Food Court, Recliner Seats")
+  status     CinemaStatus @default(ACTIVE)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  screens    Screen[]
+
+  @@index([city])
+}
+
+model Screen {
+  id            String     @id @default(uuid())
+  cinemaId      String
+  cinema        Cinema     @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
+  name          String
+  format        String     @default("IMAX")
+  totalSeats    Int        @default(120)
+  seatingLayout String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  seats         Seat[]
+  showtimes     Showtime[]
+
+  @@index([cinemaId])
+}
+
+model Seat {
+  id            String         @id @default(uuid())
+  screenId      String
+  screen        Screen         @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  row           String
+  number        Int
+  category      SeatCategory   @default(REGULAR)
+  basePrice     Int
+  createdAt     DateTime       @default(now())
+
+  bookingSeats  BookingSeat[]
+  seatHoldItems SeatHoldItem[]
+
+  @@unique([screenId, row, number])
+  @@index([screenId])
+}
+
+model Showtime {
+  id              String         @id @default(uuid())
+  movieId         String
+  movie           Movie          @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  screenId        String
+  screen          Screen         @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  startsAt        DateTime
+  endsAt          DateTime
+  format          String         @default("IMAX 3D")
+  priceMultiplier Float          @default(1.0)
+  status          ShowtimeStatus @default(SCHEDULED)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  bookings        Booking[]
+  seatHolds       SeatHold[]
+
+  @@index([movieId])
+  @@index([screenId])
+  @@index([startsAt])
+}
+
+model SeatHold {
+  id          String         @id @default(uuid())
+  userId      String?
+  user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  showtimeId  String
+  showtime    Showtime       @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  holdToken   String         @unique
+  expiresAt   DateTime
+  status      HoldStatus     @default(ACTIVE)
+  createdAt   DateTime       @default(now())
+
+  items       SeatHoldItem[]
+
+  @@index([showtimeId])
+  @@index([expiresAt])
+}
+
+model SeatHoldItem {
+  id      String   @id @default(uuid())
+  holdId  String
+  hold    SeatHold @relation(fields: [holdId], references: [id], onDelete: Cascade)
+  seatId  String
+  seat    Seat     @relation(fields: [seatId], references: [id], onDelete: Cascade)
+
+  @@unique([holdId, seatId])
+  @@index([seatId])
+}
+
+model Booking {
+  id               String        @id @default(uuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  showtimeId       String
+  showtime         Showtime      @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  bookingReference String        @unique
+  status           BookingStatus @default(PENDING)
+  
+  subtotalAmount   Int
+  convenienceFee   Int           @default(3000)
+  taxAmount        Int           @default(540)
+  discountAmount   Int           @default(0)
+  totalAmount      Int
+  
+  promoCodeId      String?
+  promoCode        PromoCode?    @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
+  
+  customerName     String?
+  customerEmail    String?
+  customerPhone    String?
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  seats            BookingSeat[]
+  payments         Payment[]
+  ticket           Ticket?
+  refunds          Refund[]
+
+  @@index([userId])
+  @@index([showtimeId])
+  @@index([bookingReference])
+}
+
+model BookingSeat {
+  id         String   @id @default(uuid())
+  bookingId  String
+  booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  seatId     String
+  seat       Seat     @relation(fields: [seatId], references: [id], onDelete: Cascade)
+  finalPrice Int
+
+  @@unique([bookingId, seatId])
+  @@index([seatId])
+}
+
+model Payment {
+  id               String        @id @default(uuid())
+  bookingId        String
+  booking          Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  gatewayOrderId   String
+  gatewayPaymentId String?
+  gatewaySignature String?
+  amount           Int
+  currency         String        @default("INR")
+  status           PaymentStatus @default(CREATED)
+  paymentMethod    String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  refunds          Refund[]
+
+  @@index([bookingId])
+  @@index([gatewayOrderId])
+}
+
+model Ticket {
+  id             String        @id @default(uuid())
+  bookingId      String        @unique
+  booking        Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  secureToken    String        @unique
+  qrCodeData     String
+  checkInStatus  CheckInStatus @default(NOT_CHECKED_IN)
+  checkedInAt    DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([secureToken])
+}
+
+model Refund {
+  id              String       @id @default(uuid())
+  bookingId       String
+  booking         Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  paymentId       String
+  payment         Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount          Int
+  reason          String?
+  gatewayRefundId String?
+  status          RefundStatus @default(REQUESTED)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([bookingId])
+  @@index([paymentId])
+}
+
+model PromoCode {
+  id            String       @id @default(uuid())
+  code          String       @unique
+  description   String?
+  discountType  DiscountType @default(PERCENTAGE)
+  discountValue Int
+  minOrderValue Int          @default(0)
+  maxDiscount   Int?
+  usageLimit    Int          @default(100)
+  timesUsed     Int          @default(0)
+  expiresAt     DateTime
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+
+  bookings      Booking[]
+
+  @@index([code])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String
+  details    String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+}
